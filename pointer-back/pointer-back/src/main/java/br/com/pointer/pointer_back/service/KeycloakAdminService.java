@@ -1,0 +1,150 @@
+package br.com.pointer.pointer_back.service;
+
+import jakarta.ws.rs.core.Response;
+import org.keycloak.OAuth2Constants;
+import org.keycloak.admin.client.Keycloak;
+import org.keycloak.admin.client.KeycloakBuilder;
+import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.admin.client.resource.UsersResource;
+import org.keycloak.representations.idm.CredentialRepresentation;
+import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Service
+public class KeycloakAdminService {
+
+    private final Keycloak keycloak;
+    private final String realm;
+
+    public KeycloakAdminService(
+            @Value("${keycloak.auth-server-url:http://localhost:8080}") String serverUrl,
+            @Value("${keycloak.realm:pointer}") String realm,
+            @Value("${keycloak.admin.username:admin}") String adminUsername,
+            @Value("${keycloak.admin.password:admin}") String adminPassword,
+            @Value("${keycloak.client-id:pointer}") String clientId,
+            @Value("${keycloak.client-secret:sua-secret-aqui}") String clientSecret) {
+        
+        this.realm = realm;
+        this.keycloak = KeycloakBuilder.builder()
+                .serverUrl(serverUrl)
+                .realm(realm)
+                .grantType(OAuth2Constants.PASSWORD)
+                .clientId(clientId)
+                .clientSecret(clientSecret)
+                .username(adminUsername)
+                .password(adminPassword)
+                .build();
+    }
+
+    /**
+     * Cria um usuário no Keycloak e retorna o ID
+     * @throws RuntimeException se houver erro na criação do usuário
+     */
+    public String createUserAndReturnId(String nome, String email, String senha) {
+        if (nome == null || nome.trim().isEmpty()) {
+            throw new IllegalArgumentException("Nome não pode ser vazio");
+        }
+        if (email == null || !email.matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
+            throw new IllegalArgumentException("Email inválido");
+        }
+        if (senha == null || senha.length() < 8) {
+            throw new IllegalArgumentException("Senha deve ter pelo menos 8 caracteres");
+        }
+
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            UsersResource usersResource = realmResource.users();
+
+            // Verifica se já existe usuário com este email
+            if (!usersResource.search(email).isEmpty()) {
+                throw new RuntimeException("Já existe um usuário com este email");
+            }
+
+            UserRepresentation user = new UserRepresentation();
+            user.setUsername(email);
+            user.setEmail(email);
+            user.setFirstName(nome);
+            user.setEnabled(true);
+            user.setEmailVerified(false);
+
+            try (Response response = usersResource.create(user)) {
+                if (response.getStatus() == 201) {
+                    String location = response.getHeaderString("Location");
+                    String userId = location.substring(location.lastIndexOf('/') + 1);
+                    
+                    // Define a senha do usuário
+                    setUserPassword(userId, senha);
+                    
+                    return userId;
+                } else {
+                    String error = response.readEntity(String.class);
+                    throw new RuntimeException("Erro ao criar usuário no Keycloak. Status: " + response.getStatus() + ". Erro: " + error);
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao criar usuário: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Define a senha do usuário
+     * @throws RuntimeException se houver erro ao definir a senha
+     */
+    public void setUserPassword(String userId, String password) {
+        if (userId == null || userId.trim().isEmpty()) {
+            throw new IllegalArgumentException("ID do usuário não pode ser vazio");
+        }
+        if (password == null || password.length() < 8) {
+            throw new IllegalArgumentException("Senha deve ter pelo menos 8 caracteres");
+        }
+
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            CredentialRepresentation credential = new CredentialRepresentation();
+            credential.setType(CredentialRepresentation.PASSWORD);
+            credential.setValue(password);
+            credential.setTemporary(false);
+
+            realmResource.users().get(userId).resetPassword(credential);
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao definir senha do usuário: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Atribui roles ao usuário
+     * @throws RuntimeException se houver erro ao atribuir as roles
+     */
+    public void assignRolesToUser(String userId, Set<String> roles) {
+        if (userId == null || userId.trim().isEmpty()) {
+            throw new IllegalArgumentException("ID do usuário não pode ser vazio");
+        }
+        if (roles == null || roles.isEmpty()) {
+            throw new IllegalArgumentException("Ao menos uma role deve ser especificada");
+        }
+
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            List<RoleRepresentation> roleRepresentations = roles.stream()
+                    .map(roleName -> {
+                        RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
+                        if (role == null) {
+                            throw new IllegalArgumentException("Role não encontrada: " + roleName);
+                        }
+                        return role;
+                    })
+                    .collect(Collectors.toList());
+
+            realmResource.users().get(userId).roles().realmLevel().add(roleRepresentations);
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao atribuir roles ao usuário: " + e.getMessage(), e);
+        }
+    }
+}
