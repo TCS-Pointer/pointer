@@ -1,5 +1,9 @@
 package br.com.pointer.pointer_back.service;
 
+import br.com.pointer.pointer_back.exception.EmailInvalidoException;
+import br.com.pointer.pointer_back.exception.KeycloakException;
+import br.com.pointer.pointer_back.exception.SenhaInvalidaException;
+import br.com.pointer.pointer_back.exception.UsuarioJaExisteException;
 import jakarta.ws.rs.core.Response;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.Keycloak;
@@ -11,8 +15,6 @@ import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -20,7 +22,7 @@ import java.util.stream.Collectors;
 @Service
 public class KeycloakAdminService {
 
-    private final Keycloak keycloak;
+    private Keycloak keycloak;
     private final String realm;
 
     public KeycloakAdminService(
@@ -43,19 +45,24 @@ public class KeycloakAdminService {
                 .build();
     }
 
+    // Método para testes
+    void setKeycloak(Keycloak keycloak) {
+        this.keycloak = keycloak;
+    }
+
     /**
      * Cria um usuário no Keycloak e retorna o ID
-     * @throws RuntimeException se houver erro na criação do usuário
+     * @throws KeycloakException se houver erro na criação do usuário
      */
     public String createUserAndReturnId(String nome, String email, String senha) {
         if (nome == null || nome.trim().isEmpty()) {
             throw new IllegalArgumentException("Nome não pode ser vazio");
         }
         if (email == null || !email.matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
-            throw new IllegalArgumentException("Email inválido");
+            throw new EmailInvalidoException("Email inválido");
         }
         if (senha == null || senha.length() < 8) {
-            throw new IllegalArgumentException("Senha deve ter pelo menos 8 caracteres");
+            throw new SenhaInvalidaException("Senha deve ter pelo menos 8 caracteres");
         }
 
         try {
@@ -64,7 +71,7 @@ public class KeycloakAdminService {
 
             // Verifica se já existe usuário com este email
             if (!usersResource.search(email).isEmpty()) {
-                throw new RuntimeException("Já existe um usuário com este email");
+                throw new UsuarioJaExisteException("Já existe um usuário com este email");
             }
 
             UserRepresentation user = new UserRepresentation();
@@ -85,24 +92,28 @@ public class KeycloakAdminService {
                     return userId;
                 } else {
                     String error = response.readEntity(String.class);
-                    throw new RuntimeException("Erro ao criar usuário no Keycloak. Status: " + response.getStatus() + ". Erro: " + error);
+                    throw new KeycloakException("Erro ao criar usuário no Keycloak. Status: " + response.getStatus() + ". Erro: " + error);
                 }
             }
         } catch (Exception e) {
-            throw new RuntimeException("Erro ao criar usuário: " + e.getMessage(), e);
+            if (e instanceof KeycloakException || e instanceof UsuarioJaExisteException || 
+                e instanceof EmailInvalidoException || e instanceof SenhaInvalidaException) {
+                throw e;
+            }
+            throw new KeycloakException("Erro ao criar usuário: " + e.getMessage(), e);
         }
     }
 
     /**
      * Define a senha do usuário
-     * @throws RuntimeException se houver erro ao definir a senha
+     * @throws KeycloakException se houver erro ao definir a senha
      */
     public void setUserPassword(String userId, String password) {
         if (userId == null || userId.trim().isEmpty()) {
             throw new IllegalArgumentException("ID do usuário não pode ser vazio");
         }
         if (password == null || password.length() < 8) {
-            throw new IllegalArgumentException("Senha deve ter pelo menos 8 caracteres");
+            throw new SenhaInvalidaException("Senha deve ter pelo menos 8 caracteres");
         }
 
         try {
@@ -114,13 +125,16 @@ public class KeycloakAdminService {
 
             realmResource.users().get(userId).resetPassword(credential);
         } catch (Exception e) {
-            throw new RuntimeException("Erro ao definir senha do usuário: " + e.getMessage(), e);
+            if (e instanceof SenhaInvalidaException) {
+                throw e;
+            }
+            throw new KeycloakException("Erro ao definir senha do usuário: " + e.getMessage(), e);
         }
     }
 
     /**
      * Atribui roles ao usuário
-     * @throws RuntimeException se houver erro ao atribuir as roles
+     * @throws KeycloakException se houver erro ao atribuir as roles
      */
     public void assignRolesToUser(String userId, Set<String> roles) {
         if (userId == null || userId.trim().isEmpty()) {
@@ -144,7 +158,10 @@ public class KeycloakAdminService {
 
             realmResource.users().get(userId).roles().realmLevel().add(roleRepresentations);
         } catch (Exception e) {
-            throw new RuntimeException("Erro ao atribuir roles ao usuário: " + e.getMessage(), e);
+            if (e instanceof IllegalArgumentException) {
+                throw e;
+            }
+            throw new KeycloakException("Erro ao atribuir roles ao usuário: " + e.getMessage(), e);
         }
     }
 }

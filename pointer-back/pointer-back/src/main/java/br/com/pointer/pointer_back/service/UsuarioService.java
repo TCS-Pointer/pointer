@@ -2,6 +2,10 @@ package br.com.pointer.pointer_back.service;
 
 import br.com.pointer.pointer_back.dto.UsuarioDTO;
 import br.com.pointer.pointer_back.dto.UsuarioResponseDTO;
+import br.com.pointer.pointer_back.exception.EmailInvalidoException;
+import br.com.pointer.pointer_back.exception.KeycloakException;
+import br.com.pointer.pointer_back.exception.SenhaInvalidaException;
+import br.com.pointer.pointer_back.exception.UsuarioJaExisteException;
 import br.com.pointer.pointer_back.mapper.UsuarioMapper;
 import br.com.pointer.pointer_back.model.Usuario;
 import br.com.pointer.pointer_back.repository.UsuarioRepository;
@@ -23,24 +27,30 @@ public class UsuarioService {
 
     @Transactional
     public UsuarioResponseDTO criarUsuario(UsuarioDTO usuarioDTO) {
-        Usuario usuario = UsuarioMapper.toEntity(usuarioDTO);
-        usuario.setMatricula(gerarMatricula());
+        try {
+            Usuario usuario = UsuarioMapper.toEntity(usuarioDTO);
+            usuario.setMatricula(gerarMatricula());
 
-        usuario = usuarioRepository.save(usuario);
+            usuario = usuarioRepository.save(usuario);
 
-        // Criar usuário no Keycloak
-        String userId = keycloakAdminService.createUserAndReturnId(usuario.getNome(), usuario.getEmail(), usuarioDTO.getSenha());
+            // Criar usuário no Keycloak
+            String userId = keycloakAdminService.createUserAndReturnId(usuario.getNome(), usuario.getEmail(), usuarioDTO.getSenha());
 
-        // Definir senha do usuário
-        keycloakAdminService.setUserPassword(userId, usuarioDTO.getSenha());
+            // Definir senha do usuário
+            keycloakAdminService.setUserPassword(userId, usuarioDTO.getSenha());
 
-        if(usuario.getSetor().equals("Recursos Humanos")||usuario.getSetor().equals("Diretoria")||usuario.getCargo().equals("Administrador")){
-            keycloakAdminService.assignRolesToUser(userId, Set.of("user", "admin"));
-        }else{
-            keycloakAdminService.assignRolesToUser(userId, Set.of("user"));
+            if(usuario.getSetor().equals("Recursos Humanos")||usuario.getSetor().equals("Diretoria")||usuario.getCargo().equals("Administrador")){
+                keycloakAdminService.assignRolesToUser(userId, Set.of("user", "admin"));
+            }else{
+                keycloakAdminService.assignRolesToUser(userId, Set.of("user"));
+            }
+
+            return UsuarioMapper.toResponseDTO(usuario);
+        } catch (UsuarioJaExisteException | EmailInvalidoException | SenhaInvalidaException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new KeycloakException("Erro ao criar usuário: " + e.getMessage(), e);
         }
-
-        return UsuarioMapper.toResponseDTO(usuario);
     }
 
     private String gerarMatricula() {
