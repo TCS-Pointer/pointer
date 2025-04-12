@@ -28,6 +28,7 @@ public class TokenController {
 
     @PostMapping
     public ResponseEntity<String> token(@RequestBody User user) {
+
         HttpHeaders headers = new HttpHeaders();
         RestTemplate restTemplate = new RestTemplate();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);

@@ -1,16 +1,13 @@
 package br.com.pointer.pointer_back.model;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.Data;
+import java.time.LocalDateTime;
 
+@Data
 @Entity
-@Getter
-@Setter
-@NoArgsConstructor
+@Table(name = "usuarios")
 public class Usuario {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -18,17 +15,15 @@ public class Usuario {
     @Column(nullable = false)
     private String nome;
 
-    @Column(unique = true, length = 6, nullable = false)
-    private String matricula;
-
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false, unique = true)
     private String email;
 
     @Column(nullable = false)
     private String senha;
 
-    @Column(unique = true, length = 11, nullable = false)
-    private String cpf;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private StatusUsuario status;
 
     @Column(nullable = false)
     private String cargo;
@@ -36,6 +31,17 @@ public class Usuario {
     @Column(nullable = false)
     private String setor;
 
-    @Column(nullable = false)
-    private boolean status = true;
+    @Column(name = "tipo_usuario", nullable = false)
+    private String tipoUsuario;
+
+    @Column(name = "dt_criacao", nullable = false)
+    private LocalDateTime dataCriacao;
+
+    @PrePersist
+    protected void onCreate() {
+        dataCriacao = LocalDateTime.now();
+        if (status == null) {
+            status = StatusUsuario.ATIVO;
+        }
+    }
 }

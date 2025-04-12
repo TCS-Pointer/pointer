@@ -5,9 +5,7 @@ import br.com.pointer.pointer_back.exception.KeycloakException;
 import br.com.pointer.pointer_back.exception.SenhaInvalidaException;
 import br.com.pointer.pointer_back.exception.UsuarioJaExisteException;
 import jakarta.ws.rs.core.Response;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.Keycloak;
-import org.keycloak.admin.client.KeycloakBuilder;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
@@ -26,23 +24,10 @@ public class KeycloakAdminService {
     private final String realm;
 
     public KeycloakAdminService(
-            @Value("${keycloak.auth-server-url:http://localhost:8080}") String serverUrl,
-            @Value("${keycloak.realm:pointer}") String realm,
-            @Value("${keycloak.admin.username:admin}") String adminUsername,
-            @Value("${keycloak.admin.password:admin}") String adminPassword,
-            @Value("${keycloak.client-id:pointer}") String clientId,
-            @Value("${keycloak.client-secret:sua-secret-aqui}") String clientSecret) {
-        
+            Keycloak keycloak,
+            @Value("${keycloak.realm}") String realm) {
+        this.keycloak = keycloak;
         this.realm = realm;
-        this.keycloak = KeycloakBuilder.builder()
-                .serverUrl(serverUrl)
-                .realm(realm)
-                .grantType(OAuth2Constants.PASSWORD)
-                .clientId(clientId)
-                .clientSecret(clientSecret)
-                .username(adminUsername)
-                .password(adminPassword)
-                .build();
     }
 
     // Método para testes
@@ -52,6 +37,7 @@ public class KeycloakAdminService {
 
     /**
      * Cria um usuário no Keycloak e retorna o ID
+     * 
      * @throws KeycloakException se houver erro na criação do usuário
      */
     public String createUserAndReturnId(String nome, String email, String senha) {
@@ -73,11 +59,20 @@ public class KeycloakAdminService {
             if (!usersResource.search(email).isEmpty()) {
                 throw new UsuarioJaExisteException("Já existe um usuário com este email");
             }
+            if (nome == null || nome.trim().isEmpty()) {
+                throw new IllegalArgumentException("Nome não pode ser vazio");
+            }
+
+            // quero que separe nome e sobrenome se tiver mais de um nome
+            String[] nomeRealArray = nome.split(" ");
+            String nomeReal = nomeRealArray[0];
+            String sobrenomeReal = nomeRealArray[1];
 
             UserRepresentation user = new UserRepresentation();
             user.setUsername(email);
             user.setEmail(email);
-            user.setFirstName(nome);
+            user.setFirstName(nomeReal);
+            user.setLastName(sobrenomeReal);
             user.setEnabled(true);
             user.setEmailVerified(false);
 
@@ -85,19 +80,20 @@ public class KeycloakAdminService {
                 if (response.getStatus() == 201) {
                     String location = response.getHeaderString("Location");
                     String userId = location.substring(location.lastIndexOf('/') + 1);
-                    
+
                     // Define a senha do usuário
                     setUserPassword(userId, senha);
-                    
+
                     return userId;
                 } else {
                     String error = response.readEntity(String.class);
-                    throw new KeycloakException("Erro ao criar usuário no Keycloak. Status: " + response.getStatus() + ". Erro: " + error);
+                    throw new KeycloakException(
+                            "Erro ao criar usuário no Keycloak. Status: " + response.getStatus() + ". Erro: " + error);
                 }
             }
         } catch (Exception e) {
-            if (e instanceof KeycloakException || e instanceof UsuarioJaExisteException || 
-                e instanceof EmailInvalidoException || e instanceof SenhaInvalidaException) {
+            if (e instanceof KeycloakException || e instanceof UsuarioJaExisteException ||
+                    e instanceof EmailInvalidoException || e instanceof SenhaInvalidaException) {
                 throw e;
             }
             throw new KeycloakException("Erro ao criar usuário: " + e.getMessage(), e);
@@ -106,6 +102,7 @@ public class KeycloakAdminService {
 
     /**
      * Define a senha do usuário
+     * 
      * @throws KeycloakException se houver erro ao definir a senha
      */
     public void setUserPassword(String userId, String password) {
@@ -134,6 +131,7 @@ public class KeycloakAdminService {
 
     /**
      * Atribui roles ao usuário
+     * 
      * @throws KeycloakException se houver erro ao atribuir as roles
      */
     public void assignRolesToUser(String userId, Set<String> roles) {
@@ -162,6 +160,42 @@ public class KeycloakAdminService {
                 throw e;
             }
             throw new KeycloakException("Erro ao atribuir roles ao usuário: " + e.getMessage(), e);
+        }
+    }
+
+    public void disableUser(String email) {
+        if (email == null || email.trim().isEmpty()) {
+            throw new IllegalArgumentException("Email não pode ser vazio");
+        }
+
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            UserRepresentation user = realmResource.users().search(email).stream()
+                    .findFirst()
+                    .orElseThrow(() -> new KeycloakException("Usuário não encontrado: " + email));
+
+            user.setEnabled(false);
+            realmResource.users().get(user.getId()).update(user);
+        } catch (Exception e) {
+            throw new KeycloakException("Erro ao desativar usuário: " + e.getMessage(), e);
+        }
+    }
+
+    public void enableUser(String email) {
+        if (email == null || email.trim().isEmpty()) {
+            throw new IllegalArgumentException("Email não pode ser vazio");
+        }
+
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            UserRepresentation user = realmResource.users().search(email).stream()
+                    .findFirst()
+                    .orElseThrow(() -> new KeycloakException("Usuário não encontrado: " + email));
+
+            user.setEnabled(true);
+            realmResource.users().get(user.getId()).update(user);
+        } catch (Exception e) {
+            throw new KeycloakException("Erro ao ativar usuário: " + e.getMessage(), e);
         }
     }
 }
