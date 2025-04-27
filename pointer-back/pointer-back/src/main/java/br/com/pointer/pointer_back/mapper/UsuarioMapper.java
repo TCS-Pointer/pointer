@@ -65,7 +65,9 @@ public class UsuarioMapper {
 
             usuario.setNome(dto.getNome());
             usuario.setEmail(dto.getEmail());
-            usuario.setSenha(dto.getSenha());
+            if (dto.getSenha() != null && !dto.getSenha().isEmpty()) {
+                usuario.setSenha(dto.getSenha());
+            }
             usuario.setStatus(dto.getStatus());
             usuario.setCargo(dto.getCargo());
             usuario.setSetor(dto.getSetor());

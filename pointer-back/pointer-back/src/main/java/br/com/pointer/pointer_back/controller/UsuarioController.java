@@ -2,9 +2,11 @@ package br.com.pointer.pointer_back.controller;
 
 import br.com.pointer.pointer_back.dto.UsuarioDTO;
 import br.com.pointer.pointer_back.dto.UsuarioResponseDTO;
+import br.com.pointer.pointer_back.dto.EmailCode;
 import br.com.pointer.pointer_back.dto.EmailDTO;
+import br.com.pointer.pointer_back.dto.UpdatePasswordDTO;
+import br.com.pointer.pointer_back.service.EmailService;
 import br.com.pointer.pointer_back.service.UsuarioService;
-import org.springframework.boot.autoconfigure.security.SecurityProperties.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -18,9 +20,11 @@ import java.util.List;
 public class UsuarioController {
 
     private final UsuarioService usuarioService;
+    private final EmailService emailService;
 
-    public UsuarioController(UsuarioService usuarioService) {
+    public UsuarioController(UsuarioService usuarioService, EmailService emailService) {
         this.usuarioService = usuarioService;
+        this.emailService = emailService;
     }
 
     @PostMapping
@@ -46,8 +50,49 @@ public class UsuarioController {
     @PostMapping("/alterar-status")
     @PreAuthorize("hasRole('admin')")
     public ResponseEntity<Void> alterarStatus(@RequestBody EmailDTO emailDTO) {
-        usuarioService.alterarStatus(emailDTO);
+        usuarioService.alternarStatusUsuarioPorEmail(emailDTO);
         return ResponseEntity.ok().build();
     }
 
+    @PutMapping("/atualizar-usuario")
+    @PreAuthorize("hasRole('admin')")
+    public ResponseEntity<UsuarioResponseDTO> atualizarUsuario(@RequestBody UsuarioDTO usuarioDTO) {
+        UsuarioResponseDTO usuarioAtualizado = usuarioService.atualizarUsuarioComSincronizacaoKeycloak(usuarioDTO);
+        return ResponseEntity.ok(usuarioAtualizado);
+    }
+
+    @PutMapping("/atualizar-senha")
+    @PreAuthorize("hasRole('user') or hasRole('admin') or hasRole('gestor')")
+    public ResponseEntity<Void> atualizarSenha(@RequestBody UpdatePasswordDTO updatePasswordDTO) {
+        usuarioService.atualizarSenhaUsuario(updatePasswordDTO);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/esqueceu-senha")
+    public ResponseEntity<Void> esqueceuSenha(@RequestBody EmailDTO emailDTO) {
+        boolean exists = usuarioService.existsByEmail(emailDTO.getEmail());
+        if (exists) {
+            String nome = usuarioService.findByEmail(emailDTO.getEmail()).getNome();
+            emailService.sendVerificationCodeEmail(emailDTO.getEmail(), nome);
+            return ResponseEntity.ok().build();
+        } else {
+            return ResponseEntity.status(404).build();
+        }
+    }
+
+    @PostMapping("/verificar-codigo")
+    public ResponseEntity<Void> verificarCodigo(@RequestBody EmailCode emailCode) {
+        boolean isValid = emailService.verifyCode(emailCode.getEmail(), emailCode.getCodigo());
+        if (isValid) {
+            return ResponseEntity.ok().build();
+        } else {
+            return ResponseEntity.status(400).build();
+        }
+    }
+
+    @PostMapping("/redefinir-senha")
+    public ResponseEntity<Void> redefinirSenha(@RequestBody UpdatePasswordDTO updatePasswordDTO) {
+        usuarioService.atualizarSenhaUsuario(updatePasswordDTO);
+        return ResponseEntity.ok().build();
+    }
 }

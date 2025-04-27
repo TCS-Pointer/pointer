@@ -7,6 +7,7 @@ import br.com.pointer.pointer_back.exception.UsuarioJaExisteException;
 import jakarta.ws.rs.core.Response;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
@@ -63,7 +64,6 @@ public class KeycloakAdminService {
                 throw new IllegalArgumentException("Nome não pode ser vazio");
             }
 
-            // quero que separe nome e sobrenome se tiver mais de um nome
             String[] nomeRealArray = nome.split(" ");
             String nomeReal = nomeRealArray[0];
             String sobrenomeReal = nomeRealArray[1];
@@ -198,4 +198,88 @@ public class KeycloakAdminService {
             throw new KeycloakException("Erro ao ativar usuário: " + e.getMessage(), e);
         }
     }
+
+    public void updateUser(String userId, UserRepresentation user) {
+        if (userId == null || userId.trim().isEmpty()) {
+            throw new IllegalArgumentException("ID do usuário não pode ser vazio");
+        }
+
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            realmResource.users().get(userId).update(user);
+        } catch (Exception e) {
+            throw new KeycloakException("Erro ao atualizar usuário: " + e.getMessage(), e);
+        }
+
+    }
+
+    public void removeRolesFromUser(String userId, Set<String> roles) {
+        if (userId == null || userId.trim().isEmpty()) {
+            throw new IllegalArgumentException("ID do usuário não pode ser vazio");
+        }
+        if (roles == null || roles.isEmpty()) {
+            throw new IllegalArgumentException("Ao menos uma role deve ser especificada");
+        }
+
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            List<RoleRepresentation> roleRepresentations = roles.stream()
+                    .map(roleName -> {
+                        RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
+                        if (role == null) {
+                            throw new IllegalArgumentException("Role não encontrada: " + roleName);
+                        }
+                        return role;
+                    })
+                    .collect(Collectors.toList());
+
+            realmResource.users().get(userId).roles().realmLevel().remove(roleRepresentations);
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException) {
+                throw e;
+            }
+            throw new KeycloakException("Erro ao remover roles do usuário: " + e.getMessage(), e);
+        }
+    }
+
+    public void updatePassword(String userId, String password) {
+        if (userId == null || userId.trim().isEmpty()) {
+            throw new IllegalArgumentException("ID do usuário não pode ser vazio");
+        }
+        if (password == null || password.length() < 8) {
+            throw new SenhaInvalidaException("Senha deve ter pelo menos 8 caracteres");
+        }
+
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            UserResource userResource = realmResource.users().get(userId);
+            
+            // Verifica se o usuário existe
+            UserRepresentation user = userResource.toRepresentation();
+            if (user == null) {
+                throw new KeycloakException("Usuário não encontrado com o ID: " + userId);
+            }
+
+            // Cria o objeto de credenciais com a nova senha
+            CredentialRepresentation credential = new CredentialRepresentation();
+            credential.setType(CredentialRepresentation.PASSWORD);
+            credential.setValue(password);
+            credential.setTemporary(false);
+
+            // Tenta resetar a senha e captura a resposta
+            try {
+                userResource.resetPassword(credential);
+            } catch (jakarta.ws.rs.WebApplicationException wae) {
+                String errorMessage = wae.getResponse().readEntity(String.class);
+                throw new KeycloakException("Erro ao resetar senha: Status " + wae.getResponse().getStatus() + " - " + errorMessage);
+            }
+
+        } catch (Exception e) {
+            if (e instanceof KeycloakException) {
+                throw e;
+            }
+            throw new KeycloakException("Erro ao atualizar senha: " + e.getMessage(), e);
+        }
+    }
+
 }
