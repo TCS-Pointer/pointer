@@ -25,11 +25,13 @@ import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.RealmResource;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.Random;
 import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.Collections;
+import java.util.Map;
 
 @Service
 public class UsuarioService {
@@ -60,31 +62,41 @@ public class UsuarioService {
 
     @Transactional
     public UsuarioResponseDTO criarUsuario(UsuarioDTO dto) {
+        try {
+            String senhaPura = dto.getSenha();
+            if (senhaPura == null) {
+                senhaPura = gerarSenhaAleatoria();
+                enviarSenhaPorEmail(dto.getEmail(), senhaPura, dto.getNome());
+            }
 
-        String senhaPura = dto.getSenha();
-        if (senhaPura == null) {
-            senhaPura = gerarSenhaAleatoria();
-            enviarSenhaPorEmail(dto.getEmail(), senhaPura, dto.getNome());
+            Usuario usuario = usuarioMapper.toEntity(dto);
+            usuario.setSenha(passwordEncoder.encode(senhaPura));
+                
+            usuario = usuarioRepository.save(usuario);
+
+            String userId = keycloakAdminService.createUserAndReturnId(
+                    usuario.getNome(), usuario.getEmail(), senhaPura);
+
+            keycloakAdminService.setUserPassword(userId, senhaPura);
+            keycloakAdminService.assignRolesToUser(userId, obterRolesPorTipo(dto.getTipoUsuario()));
+
+            return usuarioMapper.toResponseDTO(usuario);
+        } catch (Exception e) {
+            logger.error("Erro ao criar usuário: ", e);
+            throw new RuntimeException("Erro ao criar usuário: " + e.getMessage());
         }
-
-        Usuario usuario = usuarioMapper.toEntity(dto);
-        usuario.setSenha(passwordEncoder.encode(senhaPura));
-
-        usuario = usuarioRepository.save(usuario);
-
-        String userId = keycloakAdminService.createUserAndReturnId(
-                usuario.getNome(), usuario.getEmail(), senhaPura);
-
-        keycloakAdminService.setUserPassword(userId, senhaPura);
-        keycloakAdminService.assignRolesToUser(userId, obterRolesPorTipo(dto.getTipoUsuario()));
-
-        return usuarioMapper.toResponseDTO(usuario);
     }
 
     @Transactional(readOnly = true)
     public Page<UsuarioResponseDTO> listarUsuarios(PageRequest pageRequest, String setor, String perfil,
             String status) {
         Specification<Usuario> spec = Specification.where(null);
+        
+        spec = spec.and((root, query, cb) -> {
+            assert query != null;
+            query.orderBy(cb.desc(root.get("dataCriacao")));
+            return null;
+        });
 
         if (StringUtils.hasText(setor)) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("setor"), setor));
@@ -136,34 +148,66 @@ public class UsuarioService {
     }
 
     @Transactional
-    public UsuarioResponseDTO atualizarUsuarioComSincronizacaoKeycloak(UsuarioDTO dto) {
-        Usuario usuario = usuarioRepository.findByEmail(dto.getEmail())
-                .orElseThrow(() -> new UsuarioNaoEncontradoException(dto.getEmail()));
+    public UsuarioResponseDTO atualizarUsuarioComSincronizacaoKeycloak(UsuarioDTO dto, String id) {
+        Usuario usuario = usuarioRepository.findById(Long.parseLong(id))
+                .orElseThrow(() -> new UsuarioNaoEncontradoException(id));
 
+        try {
+            UserRepresentation userRepresentation = criarUserRepresentation(dto);
+            atualizarUsuarioNoKeycloak(userRepresentation);
+        } catch (Exception e) {
+            logger.error("Erro ao atualizar usuário no Keycloak: ", e);
+            throw new RuntimeException("Erro ao atualizar usuário no Keycloak: " + e.getMessage());
+        }
+        
         usuarioMapper.updateEntityFromDTO(dto, usuario);
         usuario = usuarioRepository.save(usuario);
-        atualizarUsuarioNoKeycloak(dto.getEmail(), dto);
 
         return usuarioMapper.toResponseDTO(usuario);
     }
 
-    private void atualizarUsuarioNoKeycloak(String emailAtual, UsuarioDTO dto) {
-        List<UserRepresentation> users = keycloak.realm(realm).users().search(emailAtual);
-        if (users.isEmpty())
-            return;
+    private UserRepresentation criarUserRepresentation(UsuarioDTO dto) {
+        UserRepresentation user = new UserRepresentation();
+        user.setEmail(dto.getEmail());
+        user.setUsername(dto.getEmail());
+        user.setEnabled(dto.getStatus() == StatusUsuario.ATIVO);
+        
+        // Configurar nome e sobrenome
+        String[] nomeCompleto = dto.getNome().split(" ", 2);
+        user.setFirstName(nomeCompleto[0]);
+        user.setLastName(nomeCompleto.length > 1 ? nomeCompleto[1] : "");
+        
+        // Configurar atributos adicionais se necessário
+        Map<String, List<String>> attributes = new HashMap<>();
+        attributes.put("setor", Collections.singletonList(dto.getSetor()));
+        attributes.put("tipoUsuario", Collections.singletonList(dto.getTipoUsuario()));
+        user.setAttributes(attributes);
+        
+        return user;
+    }
 
-        UserRepresentation user = criarUserRepresentation(dto);
+    private void atualizarUsuarioNoKeycloak(UserRepresentation userRepresentation) {
+        // Busca o usuário no Keycloak pelo email que está no DTO (email atual)
+        List<UserRepresentation> users = keycloak.realm(realm).users().search(userRepresentation.getEmail());
+        
+        if (users.isEmpty()) {
+            logger.error("Usuário não encontrado no Keycloak com email: {}", userRepresentation.getEmail());
+            throw new RuntimeException("Usuário não encontrado no Keycloak");
+        }
+
         String userId = users.get(0).getId();
-
-        keycloakAdminService.updateUser(userId, user);
-
+        logger.info("Usuário encontrado no Keycloak com ID: {}", userId);
+        
+        // Atualizar informações básicas do usuário
+        keycloakAdminService.updateUser(userId, userRepresentation);
+        
+        // Atualizar roles
         Set<String> rolesAtuais = obterRolesAtuaisDoUsuario(userId);
-
         if (!rolesAtuais.isEmpty()) {
             keycloakAdminService.removeRolesFromUser(userId, rolesAtuais);
         }
-
-        Set<String> novasRoles = obterRolesPorTipo(dto.getTipoUsuario());
+        
+        Set<String> novasRoles = obterRolesPorTipo(userRepresentation.getAttributes().get("tipoUsuario").get(0));
         keycloakAdminService.assignRolesToUser(userId, novasRoles);
     }
 
@@ -180,34 +224,11 @@ public class UsuarioService {
         }
     }
 
-    private UserRepresentation criarUserRepresentation(UsuarioDTO dto) {
-        UserRepresentation user = new UserRepresentation();
-
-        definirNomeCompleto(user, dto.getNome());
-        user.setEmail(dto.getEmail());
-        user.setUsername(dto.getEmail());
-        if (dto.getStatus().equals(StatusUsuario.ATIVO)) {
-            user.setEnabled(true);
-        } else {
-            user.setEnabled(false);
-        }
-
-        return user;
-    }
-
-    private void definirNomeCompleto(UserRepresentation user, String nomeCompleto) {
-        String[] partesDoNome = nomeCompleto.trim().split("\\s+");
-        user.setFirstName(partesDoNome[0]);
-        user.setLastName(partesDoNome.length > 1
-                ? String.join(" ", Arrays.copyOfRange(partesDoNome, 1, partesDoNome.length))
-                : "");
-    }
-
     private Set<String> obterRolesPorTipo(String tipoUsuario) {
         return switch (tipoUsuario) {
-            case "ADMIN" -> Set.of("user", "admin");
-            case "GESTOR" -> Set.of("gestor", "user");
-            default -> Set.of("user");
+            case "ADMIN" -> Set.of("colaborador", "admin");
+            case "GESTOR" -> Set.of("gestor", "colaborador");
+            default -> Set.of("colaborador");
         };
     }
 
@@ -253,5 +274,11 @@ public class UsuarioService {
     public Usuario findByEmail(String email) {
         return usuarioRepository.findByEmail(email)
                 .orElseThrow(() -> new UsuarioNaoEncontradoException(email));
+    }
+
+    public UsuarioResponseDTO buscarUsuario(String email) {
+        Usuario usuario = usuarioRepository.findByEmail(email)
+                .orElseThrow(() -> new UsuarioNaoEncontradoException(email));
+        return usuarioMapper.toResponseDTO(usuario);
     }
 }

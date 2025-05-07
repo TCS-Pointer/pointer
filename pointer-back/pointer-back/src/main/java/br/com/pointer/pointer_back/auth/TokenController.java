@@ -58,6 +58,7 @@ public class TokenController {
         formData.add("password", user.password());
         formData.add("grant_type", user.grantType());
         formData.add("scope", "openid");
+        formData.add("expires_in", "100000");
 
         HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(formData, headers);
         String tokenUrl = String.format("%s/realms/%s/protocol/openid-connect/token", authServerUrl, realm);

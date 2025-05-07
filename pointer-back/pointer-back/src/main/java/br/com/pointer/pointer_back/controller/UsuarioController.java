@@ -13,7 +13,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
 @RestController
 @RequestMapping("/usuarios")
@@ -54,15 +53,15 @@ public class UsuarioController {
         return ResponseEntity.ok().build();
     }
 
-    @PutMapping("/atualizar-usuario")
+    @PutMapping("/atualizar-usuario/{id}")
     @PreAuthorize("hasRole('admin')")
-    public ResponseEntity<UsuarioResponseDTO> atualizarUsuario(@RequestBody UsuarioDTO usuarioDTO) {
-        UsuarioResponseDTO usuarioAtualizado = usuarioService.atualizarUsuarioComSincronizacaoKeycloak(usuarioDTO);
+    public ResponseEntity<UsuarioResponseDTO> atualizarUsuario(@PathVariable String id, @RequestBody UsuarioDTO usuarioDTO) {
+        UsuarioResponseDTO usuarioAtualizado = usuarioService.atualizarUsuarioComSincronizacaoKeycloak(usuarioDTO, id);
         return ResponseEntity.ok(usuarioAtualizado);
     }
 
     @PutMapping("/atualizar-senha")
-    @PreAuthorize("hasRole('user') or hasRole('admin') or hasRole('gestor')")
+    @PreAuthorize("hasRole('colaborador') or hasRole('admin') or hasRole('gestor')")
     public ResponseEntity<Void> atualizarSenha(@RequestBody UpdatePasswordDTO updatePasswordDTO) {
         usuarioService.atualizarSenhaUsuario(updatePasswordDTO);
         return ResponseEntity.ok().build();
@@ -94,5 +93,23 @@ public class UsuarioController {
     public ResponseEntity<Void> redefinirSenha(@RequestBody UpdatePasswordDTO updatePasswordDTO) {
         usuarioService.atualizarSenhaUsuario(updatePasswordDTO);
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/verificar-email/{email}")
+    @PreAuthorize("hasRole('admin')")
+    public ResponseEntity<Void> verificarEmail(@PathVariable String email) {
+        boolean exists = usuarioService.existsByEmail(email);
+        if (!exists) {
+            return ResponseEntity.ok().build();
+        } else {
+            return ResponseEntity.status(404).build();
+        }
+    }
+
+    @GetMapping("/{email}")
+    @PreAuthorize("hasRole('colaborador') or hasRole('admin') or hasRole('gestor')")
+    public ResponseEntity<UsuarioResponseDTO> buscarUsuario(@PathVariable String email) {
+        UsuarioResponseDTO usuario = usuarioService.buscarUsuario(email);
+        return ResponseEntity.ok(usuario);
     }
 }

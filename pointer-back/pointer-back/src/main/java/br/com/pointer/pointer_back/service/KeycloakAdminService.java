@@ -60,9 +60,6 @@ public class KeycloakAdminService {
             if (!usersResource.search(email).isEmpty()) {
                 throw new UsuarioJaExisteException("Já existe um usuário com este email");
             }
-            if (nome == null || nome.trim().isEmpty()) {
-                throw new IllegalArgumentException("Nome não pode ser vazio");
-            }
 
             String[] nomeRealArray = nome.split(" ");
             String nomeReal = nomeRealArray[0];
@@ -175,7 +172,9 @@ public class KeycloakAdminService {
                     .orElseThrow(() -> new KeycloakException("Usuário não encontrado: " + email));
 
             user.setEnabled(false);
+            
             realmResource.users().get(user.getId()).update(user);
+            realmResource.users().get(user.getId()).logout();
         } catch (Exception e) {
             throw new KeycloakException("Erro ao desativar usuário: " + e.getMessage(), e);
         }
