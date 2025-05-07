@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:22.0.5
+    container_name: pointer-keycloak
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_PROXY: edge
+    ports:
+      - "8080:8080"
+    networks:
+      - pointer-network
+
+  pointer-back:
+    build:
+      context: ./pointer-back
+      dockerfile: Dockerfile
+    container_name: pointer-back
+    ports:
+      - "8082:8082"
+    depends_on:
+      - keycloak
+    networks:
+      - pointer-network
+
+  pointer-front:
+    build:
+      context: ./pointer-front
+      dockerfile: Dockerfile
+    container_name: pointer-front
+    ports:
+      - "3000:80"
+    depends_on:
+      - keycloak
+      - pointer-back
+    networks:
+      - pointer-network
+
+networks:
+  pointer-network:
+    driver: bridge 
