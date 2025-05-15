@@ -16,7 +16,7 @@ import jakarta.persistence.PrePersist;
 @Data
 @Entity
 @Table(name = "leitura_comunicado")
-public class LeituraDeComunicado {
+public class LeituraComunicado {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
