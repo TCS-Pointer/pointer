@@ -38,14 +38,7 @@ public class TokenController {
 
     @PostMapping
     public ResponseEntity<String> token(@RequestBody User user) {
-        RealmResource realmResource = keycloak.realm(realm);
-        List<UserRepresentation> users = realmResource.users().search(user.username());
-
-        if (!users.isEmpty()) {
-            UserRepresentation userRep = users.get(0);
-            UserResource userResource = realmResource.users().get(userRep.getId());
-            userResource.logout();
-        }
+       
 
         HttpHeaders headers = new HttpHeaders();
         RestTemplate restTemplate = new RestTemplate();
