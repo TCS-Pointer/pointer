@@ -33,6 +33,7 @@ public class SecurityConfig {
                         .requestMatchers("/usuarios/verificar-codigo").permitAll()
                         .requestMatchers("/usuarios/redefinir-senha").permitAll()
                         .requestMatchers("/usuarios/esqueceu-senha").permitAll()
+
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(new JWTConverter())));
